@@ -25,6 +25,8 @@ object MainTestKafka extends App {
     .option("dbtable", "testdb.testTable")
     .option("user", "DBC")
     .option("password", "dbc")
+    .option("driver", "com.teradata.jdbc.TeraDriver")
+    .outputMode("append")
     .start()
 
   q.awaitTermination()

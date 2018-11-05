@@ -19,6 +19,8 @@ package org.apache.spark.sql.jdbcsink
 
 import java.sql.Connection
 
+import scala.util.Random
+
 import org.apache.spark.{SparkEnv, TaskContext}
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql._
@@ -193,19 +195,19 @@ class JdbcSink(sqlContext: SQLContext,
 
       repartitionedDF.queryExecution.toRdd.foreachPartition(iterator => {
 
-        val executorTable = targetTable + "$" + SparkEnv.get.executorId + "_" + TaskContext.getPartitionId()
+        val executorTable = s"${targetTable}_$$${SparkEnv.get.executorId}_${TaskContext.getPartitionId()}" +
+          s"_${TaskContext.get().taskAttemptId()}_${Random.nextInt(Integer.MAX_VALUE)}_${System.currentTimeMillis()}"
 
         val executorParameters = parameters + ("dbtable" -> executorTable)
         val executorOptions = new JDBCOptions(executorParameters)
 
         val conn = createConnectionFactory(executorOptions).apply()
         val tableExists = JdbcUtils.tableExists(conn, executorOptions)
-        if (!tableExists) {
+        if (tableExists) {
+          throw new IllegalStateException(s"Executor table $executorTable already exists")
+        }
+        else{
           createTable(conn, rddSchema, sparkSession, executorOptions)
-        } else {
-           if (!isTableEmpty(conn, executorOptions)) {
-             throw new IllegalStateException(s"Executor table $executorTable is not empty")
-           }
         }
         //Write to executor table
         val insertStmt = getInsertStatement(executorTable, rddSchema, None, isCaseSensitive, dialect)
@@ -224,8 +226,8 @@ class JdbcSink(sqlContext: SQLContext,
           copyStmt,
           isolationLevel)
 
-        //Truncate the executor table
-        truncateTable(conn, executorOptions)
+        //Drop the executor table
+        dropTable(conn, executorTable)
       })
     } else {
 
@@ -236,19 +238,19 @@ class JdbcSink(sqlContext: SQLContext,
       val sparkSession = df.sparkSession
       repartitionedDF.queryExecution.toRdd.foreachPartition(iterator => {
 
-        val executorTable = targetTable + "$" + SparkEnv.get.executorId + "_" + TaskContext.getPartitionId()
+      val executorTable = s"${targetTable}_$$${SparkEnv.get.executorId}_${TaskContext.getPartitionId()}" +
+        s"_${TaskContext.get().taskAttemptId()}_${Random.nextInt(Integer.MAX_VALUE)}_${System.currentTimeMillis()}"
 
         val executorParameters = parameters + ("dbtable" -> executorTable)
         val executorOptions = new JDBCOptions(executorParameters)
 
         val conn = createConnectionFactory(executorOptions).apply()
         val tableExists = JdbcUtils.tableExists(conn, executorOptions)
-        if (!tableExists) {
+        if (tableExists) {
+          throw new IllegalStateException(s"Executor table $executorTable already exists")
+        }
+        else{
           createTable(conn, rddSchema, sparkSession, executorOptions)
-        } else {
-          if (!isTableEmpty(conn, executorOptions)) {
-            throw new IllegalStateException(s"Executor table $executorTable is not empty")
-          }
         }
         //Write to executor table
         val insertStmt = getInsertStatement(executorTable, rddSchema, None, isCaseSensitive, dialect)
@@ -267,8 +269,8 @@ class JdbcSink(sqlContext: SQLContext,
           copyStmt,
           isolationLevel)
 
-        //Truncate the executor table
-        truncateTable(conn, executorOptions)
+        //Drop the executor table
+        dropTable(conn, executorTable)
       })
     }
   }
